@@ -2,18 +2,18 @@ name: Deteção Diária e Exportação para Google Drive
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # Executa todos os dias às 03:00 UTC (04:00 de Portugal)
-  workflow_dispatch:     # Permite testar manualmente clicando num botão
+    - cron: '0 3 * * *'  # Executa automaticamente todos os dias às 03:00 UTC (04:00 de Portugal)
+  workflow_dispatch:     # Permite executar manualmente pelo botão no GitHub
 
 jobs:
   run-gee-drive:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Código
-        uses: actions/checkout@v3
+        uses: actions/checkout@v4   # Atualizado para v4 (sem aviso de depreciação)
 
       - name: Configurar Python
-        uses: actions/setup-python@v4
+        uses: actions/setup-python@v5 # Atualizado para v5 (sem aviso de depreciação)
         with:
           python-version: '3.10'
 
