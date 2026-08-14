@@ -3,7 +3,7 @@ import json
 import os
 import ee
 
-# 1. Autenticação no Earth Engine via Secret do GitHub
+# 1. Autenticação do Earth Engine via Secret do GitHub
 gee_key_fmt = os.environ.get('GEE_SERVICE_ACCOUNT_KEY')
 if gee_key_fmt:
   key_dict = json.loads(gee_key_fmt)
@@ -19,7 +19,7 @@ today = datetime.utcnow().date()
 yesterday = today - timedelta(days=1)
 ref_start = today - timedelta(days=10)
 
-# Bounding Box de Portugal Continental [LongMin, LatMin, LongMax, LatMax]
+# Bounding Box de Portugal Continental
 aoi = ee.Geometry.Rectangle([-9.5, 36.9, -6.1, 42.1])
 
 # 3. Filtrar Sentinel-2 SR
@@ -57,19 +57,19 @@ burnt_vectors = burnt_mask.reduceToVectors(
     maxPixels=1e9,
 )
 
-# 6. EXPORTAR DIRETO PARA O TEU GOOGLE DRIVE
+# 6. EXPORTAR PARA A TUA PASTA ESPECÍFICA NO GOOGLE DRIVE
 filename = f'Perimetros_Ardidos_{today.strftime("%Y_%m_%d")}'
 
 task = ee.batch.Export.table.toDrive(
     collection=burnt_vectors,
     description=filename,
-    folder='Areas_Ardidas_GEE',  # Pasta criada automaticamente no teu Drive
+    folder='003 Areas_Ardidas_GEE',  # Pasta partilhada na tua conta anternative3@gmail.com
     fileNamePrefix=filename,
-    fileFormat='GeoJSON',
+    fileFormat='GeoJSON',  # Podes alterar para 'SHP' se preferires Shapefile
 )
 
 task.start()
 print(
-    f'Tarefa enviada para o Earth Engine! O ficheiro será gravado na pasta'
-    ' "Areas_Ardidas_GEE" do teu Google Drive.'
+    f'Sucesso! O ficheiro {filename} foi enviado para a pasta "003'
+    ' Areas_Ardidas_GEE" no Google Drive.'
 )
