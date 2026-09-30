@@ -76,7 +76,7 @@ else:
     geojson_data = burned_vectors.getInfo()
 
 # ---------------------------------------------------------------------------
-# GUARDAR FICHEIRO NA PASTA DO REPOSAITÓRIO (./outputs)
+# GUARDAR FICHEIRO LOCALMENTE PARA O RCLONE ENVIAR
 # ---------------------------------------------------------------------------
 output_dir = os.path.join(os.getcwd(), 'outputs')
 os.makedirs(output_dir, exist_ok=True)
@@ -87,4 +87,4 @@ file_path = os.path.join(output_dir, filename)
 with open(file_path, 'w', encoding='utf-8') as f:
     json.dump(geojson_data, f)
 
-print(f"Sucesso! Ficheiro guardado com êxito em: {file_path}")
+print(f"Sucesso! GeoJSON gerado com êxito em: {file_path}")
