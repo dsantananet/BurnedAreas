@@ -12,7 +12,6 @@ from googleapiclient.http import MediaFileUpload
 # ---------------------------------------------------------------------------
 DRIVE_FOLDER_ID = '1BoyO9QNldRid_j2G8Q8qIS9GkpfSDI_X'
 
-# Autenticação no Google Earth Engine com Service Account
 service_account_key = os.environ.get("GEE_SERVICE_ACCOUNT_KEY")
 if not service_account_key:
     raise ValueError("A variável de ambiente GEE_SERVICE_ACCOUNT_KEY não está configurada.")
@@ -33,7 +32,6 @@ today = datetime.utcnow()
 yesterday = today - timedelta(days=1)
 pre_start = yesterday - timedelta(days=10)
 
-# ROI - Portugal Continental
 roi = ee.Geometry.Rectangle([-9.5, 36.9, -6.1, 42.1])
 
 def mask_s2_clouds(image):
@@ -43,41 +41,49 @@ def mask_s2_clouds(image):
     mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
     return image.updateMask(mask).divide(10000)
 
-# Coleções Sentinel-2
-s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
+s2_base = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
     .filterBounds(roi) \
     .map(mask_s2_clouds)
 
-# Imagem Pós-fogo (Últimas 24-48h)
-img_pos = s2.filterDate(yesterday.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')).median()
+# Verificar imagens disponíveis nas últimas 24h
+s2_pos_col = s2_base.filterDate(yesterday.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d'))
+pos_count = s2_pos_col.size().getInfo()
 
-# Imagem Pré-fogo (Janela de referência de 10 dias)
-img_pre = s2.filterDate(pre_start.strftime('%Y-%m-%d'), yesterday.strftime('%Y-%m-%d')).median()
+# Se não houver passagens nas últimas 24h, expande para a janela dos últimos 5 dias
+if pos_count == 0:
+    print("Aviso: Nenhuma imagem Sentinel-2 encontrada para as últimas 24h. Expandindo para os últimos 5 dias...")
+    s2_pos_col = s2_base.filterDate((today - timedelta(days=5)).strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d'))
+    pos_count = s2_pos_col.size().getInfo()
 
-# NBR = (B8 - B12) / (B8 + B12)
-nbr_pre = img_pre.normalizedDifference(['B8', 'B12'])
-nbr_pos = img_pos.normalizedDifference(['B8', 'B12'])
+if pos_count == 0:
+    print("Aviso: Nenhuma imagem Sentinel-2 válida encontrada. A gerar GeoJSON vazio...")
+    geojson_data = {
+        "type": "FeatureCollection",
+        "features": []
+    }
+else:
+    img_pos = s2_pos_col.median()
+    img_pre = s2_base.filterDate(pre_start.strftime('%Y-%m-%d'), yesterday.strftime('%Y-%m-%d')).median()
 
-# dNBR = NBR_pre - NBR_pos
-dnbr = nbr_pre.subtract(nbr_pos)
+    nbr_pre = img_pre.normalizedDifference(['B8', 'B12'])
+    nbr_pos = img_pos.normalizedDifference(['B8', 'B12'])
 
-# Limiar de severidade de área queimada (> 0.27)
-burned_mask = dnbr.gt(0.27)
+    dnbr = nbr_pre.subtract(nbr_pos)
+    burned_mask = dnbr.gt(0.27)
 
-# Vetorização
-burned_vectors = burned_mask.selfMask().reduceToVectors(
-    geometry=roi,
-    crs='EPSG:4326',
-    scale=20,
-    geometryType='polygon',
-    eightConnected=False,
-    labelProperty='burned',
-    maxPixels=1e9
-)
+    burned_vectors = burned_mask.selfMask().reduceToVectors(
+        geometry=roi,
+        crs='EPSG:4326',
+        scale=20,
+        geometryType='polygon',
+        eightConnected=False,
+        labelProperty='burned',
+        maxPixels=1e9
+    )
 
-# Converter para GeoJSON em memória
-geojson_data = burned_vectors.getInfo()
+    geojson_data = burned_vectors.getInfo()
 
+# Guardar em ficheiro temporário
 filename = f"Perimetros_Ardidos_{today.strftime('%Y_%m_%d')}.geojson"
 temp_dir = tempfile.gettempdir()
 local_file_path = os.path.join(temp_dir, filename)
