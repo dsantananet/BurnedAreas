@@ -10,7 +10,6 @@ from googleapiclient.http import MediaFileUpload
 # ---------------------------------------------------------------------------
 # CONFIGURAÇÃO
 # ---------------------------------------------------------------------------
-# ID da pasta '003 Areas_Ardidas_GEE' do teu Google Drive:
 DRIVE_FOLDER_ID = '1BoyO9QNldRid_j2G8Q8qIS9GkpfSDI_X'
 
 # Autenticação no Google Earth Engine com Service Account
@@ -111,5 +110,3 @@ uploaded_file = drive_service.files().create(
 ).execute()
 
 print(f"Sucesso! Ficheiro '{uploaded_file.get('name')}' enviado para o Google Drive com o ID: {uploaded_file.get('id')}")
-    ' Areas_Ardidas_GEE" no Google Drive.'
-)
