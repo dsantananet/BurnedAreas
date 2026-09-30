@@ -83,7 +83,7 @@ else:
 
     geojson_data = burned_vectors.getInfo()
 
-# Guardar em ficheiro temporário
+# Guardar em ficheiro temporário local
 filename = f"Perimetros_Ardidos_{today.strftime('%Y_%m_%d')}.geojson"
 temp_dir = tempfile.gettempdir()
 local_file_path = os.path.join(temp_dir, filename)
@@ -94,9 +94,9 @@ with open(local_file_path, 'w', encoding='utf-8') as f:
 print(f"GeoJSON gerado localmente: {local_file_path}")
 
 # ---------------------------------------------------------------------------
-# UPLOAD DIRETO PARA O GOOGLE DRIVE VIA API
+# UPLOAD DIRETO PARA O GOOGLE DRIVE VIA API (COM SUPORTE A PASTA PARTILHADA)
 # ---------------------------------------------------------------------------
-drive_scopes = ['https://www.googleapis.com/auth/drive.file']
+drive_scopes = ['https://www.googleapis.com/auth/drive']
 drive_creds = service_account.Credentials.from_service_account_info(
     key_dict, scopes=drive_scopes
 )
@@ -107,12 +107,14 @@ file_metadata = {
     'parents': [DRIVE_FOLDER_ID]
 }
 
-media = MediaFileUpload(local_file_path, mimetype='application/geo+json')
+media = MediaFileUpload(local_file_path, mimetype='application/geo+json', resumable=True)
 
 uploaded_file = drive_service.files().create(
     body=file_metadata,
     media_body=media,
-    fields='id, name'
+    fields='id, name',
+    supportsAllDrives=True,
+    supportsTeamDrives=True
 ).execute()
 
 print(f"Sucesso! Ficheiro '{uploaded_file.get('name')}' enviado para o Google Drive com o ID: {uploaded_file.get('id')}")
