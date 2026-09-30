@@ -1,15 +1,12 @@
-name: Deteção Diária de Áreas Ardidas
+name: Deteção Diária e Exportação via Rclone
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # Executa automaticamente todos os dias às 03:00 UTC
-  workflow_dispatch:     # Permite executar manualmente pelo botão no GitHub
-
-permissions:
-  contents: write
+    - cron: '0 3 * * *'  # Executa diariamente às 03:00 UTC
+  workflow_dispatch:     # Execução manual pelo botão no GitHub
 
 jobs:
-  run-gee-drive:
+  run-gee-rclone:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Código
@@ -20,10 +17,14 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências
+      - name: Instalar Dependências (Earth Engine API)
         run: |
           python -m pip install --upgrade pip
           pip install earthengine-api
+
+      - name: Instalar Rclone
+        run: |
+          sudo curl https://rclone.org/install.sh | sudo bash
 
       - name: Executar Deteção de Áreas Ardidas
         env:
@@ -31,10 +32,25 @@ jobs:
         run: |
           python detect_burnt_areas.py
 
-      - name: Guardar e Fazer Commit do GeoJSON no Repositório
+      - name: Enviar GeoJSON para o Google Drive via Rclone
+        env:
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
         run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add outputs/
-          git commit -m "Auto-update: Perímetros Ardidos ${{ date +'%Y-%m-%d' }}" || echo "Sem alterações para commit"
-          git push
+          # Criar ficheiro de credenciais temporário
+          echo "$GEE_SERVICE_ACCOUNT_KEY" > sa_key.json
+
+          # Configurar o Rclone dinamicamente para usar a Service Account
+          mkdir -p ~/.config/rclone
+          cat <<EOF > ~/.config/rclone/rclone.conf
+          [gdrive]
+          type = drive
+          scope = drive
+          service_account_file = $(pwd)/sa_key.json
+          root_folder_id = 1BoyO9QNldRid_j2G8Q8qIS9GkpfSDI_X
+          EOF
+
+          # Executar a cópia direta para o Google Drive
+          rclone copy ./outputs gdrive: -v
+
+          # Apagar a chave por segurança
+          rm sa_key.json
