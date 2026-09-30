@@ -1,75 +1,115 @@
-from datetime import datetime, timedelta
-import json
 import os
+import json
+import tempfile
+from datetime import datetime, timedelta
 import ee
+from google.oauth2 import service_account
+from googleapiclient.discovery import build
+from googleapiclient.http import MediaFileUpload
 
-# 1. Autenticação do Earth Engine via Secret do GitHub
-gee_key_fmt = os.environ.get('GEE_SERVICE_ACCOUNT_KEY')
-if gee_key_fmt:
-  key_dict = json.loads(gee_key_fmt)
-  credentials = ee.ServiceAccountCredentials(
-      key_dict['client_email'], key_data=gee_key_fmt
-  )
-  ee.Initialize(credentials)
-else:
-  ee.Initialize()
+# ---------------------------------------------------------------------------
+# CONFIGURAÇÃO
+# ---------------------------------------------------------------------------
+# ID da pasta '003 Areas_Ardidas_GEE' do teu Google Drive:
+DRIVE_FOLDER_ID = '1BoyO9QNldRid_j2G8Q8qIS9GkpfSDI_X'
 
-# 2. Janela temporal (Últimas 24h vs Referência dos últimos 10 dias)
-today = datetime.utcnow().date()
-yesterday = today - timedelta(days=1)
-ref_start = today - timedelta(days=10)
+# Autenticação no Google Earth Engine com Service Account
+service_account_key = os.environ.get("GEE_SERVICE_ACCOUNT_KEY")
+if not service_account_key:
+    raise ValueError("A variável de ambiente GEE_SERVICE_ACCOUNT_KEY não está configurada.")
 
-# Bounding Box de Portugal Continental
-aoi = ee.Geometry.Rectangle([-9.5, 36.9, -6.1, 42.1])
-
-# 3. Filtrar Sentinel-2 SR
-s2 = (
-    ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED')
-    .filterBounds(aoi)
-    .filter(ee.Filter.lt('CLOUDY_PIXEL_PERCENTAGE', 20))
+key_dict = json.loads(service_account_key)
+credentials = ee.ServiceAccountCredentials(
+    key_dict['client_email'],
+    key_data=service_account_key
 )
+ee.Initialize(credentials)
 
-post_img = s2.filterDate(
-    yesterday.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')
-).median()
-pre_img = s2.filterDate(
-    ref_start.strftime('%Y-%m-%d'), yesterday.strftime('%Y-%m-%d')
-).median()
+print("Autenticação no Google Earth Engine realizada com sucesso.")
 
+# ---------------------------------------------------------------------------
+# PROCESSAMENTO DAS ÁREAS ARDIDAS (Sentinel-2 dNBR)
+# ---------------------------------------------------------------------------
+today = datetime.utcnow()
+yesterday = today - timedelta(days=1)
+pre_start = yesterday - timedelta(days=10)
 
-def get_nbr(img):
-  return img.normalizedDifference(['B8', 'B12'])
+# ROI - Portugal Continental
+roi = ee.Geometry.Rectangle([-9.5, 36.9, -6.1, 42.1])
 
+def mask_s2_clouds(image):
+    qa = image.select('QA60')
+    cloud_bit_mask = 1 << 10
+    cirrus_bit_mask = 1 << 11
+    mask = qa.bitwiseAnd(cloud_bit_mask).eq(0).And(qa.bitwiseAnd(cirrus_bit_mask).eq(0))
+    return image.updateMask(mask).divide(10000)
 
-# 4. Calcular dNBR e Máscara de Área Ardida
-dnbr = get_nbr(pre_img).subtract(get_nbr(post_img))
-burnt_mask = dnbr.gt(0.27).selfMask()
+# Coleções Sentinel-2
+s2 = ee.ImageCollection('COPERNICUS/S2_SR_HARMONIZED') \
+    .filterBounds(roi) \
+    .map(mask_s2_clouds)
 
-# 5. Converter Raster para Vetor (Polígonos)
-burnt_vectors = burnt_mask.reduceToVectors(
-    geometry=aoi,
-    crs=dnbr.projection(),
+# Imagem Pós-fogo (Últimas 24-48h)
+img_pos = s2.filterDate(yesterday.strftime('%Y-%m-%d'), today.strftime('%Y-%m-%d')).median()
+
+# Imagem Pré-fogo (Janela de referência de 10 dias)
+img_pre = s2.filterDate(pre_start.strftime('%Y-%m-%d'), yesterday.strftime('%Y-%m-%d')).median()
+
+# NBR = (B8 - B12) / (B8 + B12)
+nbr_pre = img_pre.normalizedDifference(['B8', 'B12'])
+nbr_pos = img_pos.normalizedDifference(['B8', 'B12'])
+
+# dNBR = NBR_pre - NBR_pos
+dnbr = nbr_pre.subtract(nbr_pos)
+
+# Limiar de severidade de área queimada (> 0.27)
+burned_mask = dnbr.gt(0.27)
+
+# Vetorização
+burned_vectors = burned_mask.selfMask().reduceToVectors(
+    geometry=roi,
+    crs='EPSG:4326',
     scale=20,
     geometryType='polygon',
     eightConnected=False,
-    labelProperty='burnt_flag',
-    bestEffort=True,
-    maxPixels=1e9,
+    labelProperty='burned',
+    maxPixels=1e9
 )
 
-# 6. EXPORTAR PARA A TUA PASTA ESPECÍFICA NO GOOGLE DRIVE
-filename = f'Perimetros_Ardidos_{today.strftime("%Y_%m_%d")}'
+# Converter para GeoJSON em memória
+geojson_data = burned_vectors.getInfo()
 
-task = ee.batch.Export.table.toDrive(
-    collection=burnt_vectors,
-    description=filename,
-    folder='003 Areas_Ardidas_GEE',  # Pasta partilhada na tua conta anternative3@gmail.com
-    fileNamePrefix=filename,
-    fileFormat='GeoJSON',  # Podes alterar para 'SHP' se preferires Shapefile
+filename = f"Perimetros_Ardidos_{today.strftime('%Y_%m_%d')}.geojson"
+temp_dir = tempfile.gettempdir()
+local_file_path = os.path.join(temp_dir, filename)
+
+with open(local_file_path, 'w', encoding='utf-8') as f:
+    json.dump(geojson_data, f)
+
+print(f"GeoJSON gerado localmente: {local_file_path}")
+
+# ---------------------------------------------------------------------------
+# UPLOAD DIRETO PARA O GOOGLE DRIVE VIA API
+# ---------------------------------------------------------------------------
+drive_scopes = ['https://www.googleapis.com/auth/drive.file']
+drive_creds = service_account.Credentials.from_service_account_info(
+    key_dict, scopes=drive_scopes
 )
+drive_service = build('drive', 'v3', credentials=drive_creds)
 
-task.start()
-print(
-    f'Sucesso! O ficheiro {filename} foi enviado para a pasta "003'
+file_metadata = {
+    'name': filename,
+    'parents': [DRIVE_FOLDER_ID]
+}
+
+media = MediaFileUpload(local_file_path, mimetype='application/geo+json')
+
+uploaded_file = drive_service.files().create(
+    body=file_metadata,
+    media_body=media,
+    fields='id, name'
+).execute()
+
+print(f"Sucesso! Ficheiro '{uploaded_file.get('name')}' enviado para o Google Drive com o ID: {uploaded_file.get('id')}")
     ' Areas_Ardidas_GEE" no Google Drive.'
 )
