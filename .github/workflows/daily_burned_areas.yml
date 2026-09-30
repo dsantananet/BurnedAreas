@@ -1,9 +1,12 @@
-name: Deteção Diária e Exportação para Google Drive
+name: Deteção Diária de Áreas Ardidas
 
 on:
   schedule:
     - cron: '0 3 * * *'  # Executa automaticamente todos os dias às 03:00 UTC
   workflow_dispatch:     # Permite executar manualmente pelo botão no GitHub
+
+permissions:
+  contents: write
 
 jobs:
   run-gee-drive:
@@ -17,13 +20,21 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências (EE API & Google Drive API)
+      - name: Instalar Dependências
         run: |
           python -m pip install --upgrade pip
-          pip install earthengine-api google-api-python-client google-auth-httplib2 google-auth-oauthlib
+          pip install earthengine-api
 
-      - name: Executar Deteção e Exportar para Drive
+      - name: Executar Deteção de Áreas Ardidas
         env:
           GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
         run: |
           python detect_burnt_areas.py
+
+      - name: Guardar e Fazer Commit do GeoJSON no Repositório
+        run: |
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git add outputs/
+          git commit -m "Auto-update: Perímetros Ardidos ${{ date +'%Y-%m-%d' }}" || echo "Sem alterações para commit"
+          git push
