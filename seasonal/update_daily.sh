@@ -16,6 +16,7 @@ fi
     -e GEE_KEY_FILE=/private/service-account.json \
     -v "$PRIVATE/service-account.json:/private/service-account.json:ro" \
     -v "$BASE/outputs:/outputs" \
-    ignispyro/burned-areas-gee:1.0 \
+    -v "$BASE:/app:ro" \
+    ignispyro/burned-areas-gee:1.1 \
     --year "${1:-$(date -u +%Y)}" --output /outputs \
     >> "$BASE/logs/update-$(date -u +%Y%m%d).log" 2>&1

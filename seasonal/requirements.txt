@@ -1,3 +1,4 @@
 earthengine-api==1.7.46
 psycopg[binary]==3.3.6
 truststore==0.10.4
+shapely==2.1.2

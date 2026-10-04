@@ -19,6 +19,10 @@ if sys.platform == 'win32':
 import ee
 import psycopg
 from psycopg.types.json import Jsonb
+from shapely.geometry import shape, mapping, box
+from shapely.ops import unary_union
+from shapely import make_valid
+from shapely.prepared import prep
 
 SOURCE = 'MODIS/061/MCD64A1'
 BOUNDARIES = 'USDOS/LSIB_SIMPLE/2017'
@@ -49,20 +53,19 @@ def regions():
     europe_countries = countries.filter(ee.Filter.eq('wld_rgn', 'Europe'))
     # Include transcontinental states explicitly, then clip to documented extent.
     trans = countries.filter(ee.Filter.inList('country_na', ['Russia', 'Turkey', 'Cyprus']))
-    europe = europe_countries.merge(trans).geometry().intersection(extent, 100)
-    portugal = countries.filter(ee.Filter.eq('country_na', 'Portugal')).geometry().intersection(
-        ee.Geometry.Rectangle([-9.6, 36.8, -6.0, 42.3], geodesic=False), 100)
-    return {'europa': europe, 'portugal_continental': portugal}
+    data = europe_countries.merge(trans).getInfo()['features']
+    europe = unary_union([make_valid(shape(f['geometry'])) for f in data]).intersection(box(-25,34,60,72))
+    portugal = unary_union([make_valid(shape(f['geometry'])) for f in data if f['properties']['country_na']=='Portugal']).intersection(box(-9.6,36.8,-6.0,42.3))
+    return {'europa': europe, 'portugal_continental': portugal}, sorted({f['properties']['country_na'] for f in data})
 
 
 def extract(year, start, end, output):
-    roi = regions()
-    collection = ee.ImageCollection(SOURCE).filterDate(start.isoformat(), end.isoformat()).filterBounds(roi['europa'])
+    roi, country_names = regions()
+    collection = ee.ImageCollection(SOURCE).filterDate(start.isoformat(), end.isoformat())
     logging.info('Consultar disponibilidade MODIS para %s a %s', start, end)
     info = ee.Dictionary({
         'months_ms': collection.aggregate_array('system:time_start'),
         'asset_ids': collection.aggregate_array('system:index'),
-        'country_names': ee.FeatureCollection(BOUNDARIES).filter(ee.Filter.eq('wld_rgn','Europe')).aggregate_array('country_na'),
     }).getInfo()
     months = sorted({datetime.fromtimestamp(ms/1000, timezone.utc).date().isoformat() for ms in info['months_ms']})
     metadata = {
@@ -71,7 +74,7 @@ def extract(year, start, end, output):
         'available_months': months, 'asset_ids': info['asset_ids'],
         'latest_source_month': months[-1] if months else None,
         'region_definition': 'LSIB Europe + Russia/Turkey/Cyprus; clipped [-25,34,60,72]; Portugal mainland',
-        'lsib_europe_countries': sorted(set(info['country_names'])),
+        'lsib_europe_countries': country_names,
         'quality_filter': 'QA land=1 and valid=1; BurnDate within requested dates',
         'deduplication': 'earliest burn day per pixel across monthly products',
         'validation': 'satellite classification; not official fire perimeters',
@@ -93,23 +96,19 @@ def extract(year, start, end, output):
     # Preserve the MODIS sinusoidal grid; 500m is nominal, native grid ~463.3m.
     projection = ee.Image(collection.first()).select('BurnDate').projection()
     scale = projection.nominalScale()
-    burn = burn.clip(roi['europa'])
     pixel_area = ee.Image.pixelArea().divide(10000).rename('area_ha')
     cells = []
     for x in range(-25,60,5):
         for y in range(34,72,5):
             bounds = [x,y,min(x+5,60),min(y+5,72)]
-            cells.append(ee.Feature(ee.Geometry.Rectangle(bounds,geodesic=False),{'tile':f'{x}_{y}','bounds':bounds}))
-    grid = ee.FeatureCollection(cells)
-    logging.info('Identificar blocos com píxeis ardidos antes de vetorizar')
-    occupied = pixel_area.updateMask(burn.mask()).reduceRegions(
-        collection=grid,reducer=ee.Reducer.sum(),crs=projection,scale=scale,tileScale=4,
-    ).filter(ee.Filter.gt('sum',0)).getInfo()['features']
-    occupied.sort(key=lambda f: (abs(f['properties']['bounds'][0]+10)+abs(f['properties']['bounds'][1]-39)))
-    logging.info('Blocos com área ardida: %d',len(occupied))
+            if roi['europa'].intersects(box(*bounds)):
+                cells.append({'tile':f'{x}_{y}','bounds':bounds})
+    occupied = sorted(cells,key=lambda f: abs(f['bounds'][0]+10)+abs(f['bounds'][1]-39))
+    logging.info('Blocos a verificar: %d',len(occupied))
+    prepared = prep(roi['europa'])
     features = []
     for i, cell in enumerate(occupied):
-        tile = ee.Geometry.Rectangle(cell['properties']['bounds'],geodesic=False)
+        tile = ee.Geometry.Rectangle(cell['bounds'],geodesic=False)
         vectors = burn.addBands(pixel_area).reduceToVectors(
             geometry=tile,crs=projection,scale=scale,geometryType='polygon',
             eightConnected=False,labelProperty='burn_doy',reducer=ee.Reducer.sum(),
@@ -125,13 +124,28 @@ def extract(year, start, end, output):
             token = page.get('nextPageToken')
             if not token:
                 break
-        features.extend(tile_features)
-        (output/f"tile_{cell['properties']['tile']}.geojson").write_text(
-            json.dumps({'type':'FeatureCollection','features':tile_features}),encoding='utf-8')
-        logging.info('Bloco %d/%d %s: %d polígonos; acumulado=%d',i+1,len(occupied),cell['properties']['tile'],len(tile_features),len(features))
+        clipped = []
+        for feature in tile_features:
+            geom = make_valid(shape(feature['geometry']))
+            if not prepared.intersects(geom):
+                continue
+            if not prepared.covers(geom):
+                geom = geom.intersection(roi['europa'])
+            if geom.is_empty or geom.area == 0:
+                continue
+            if geom.geom_type == 'GeometryCollection':
+                geom = unary_union([g for g in geom.geoms if g.geom_type in ('Polygon','MultiPolygon')])
+            if geom.is_empty:
+                continue
+            feature['geometry'] = mapping(geom)
+            clipped.append(feature)
+        features.extend(clipped)
+        (output/f"tile_{cell['tile']}.geojson").write_text(
+            json.dumps({'type':'FeatureCollection','features':clipped}),encoding='utf-8')
+        logging.info('Bloco %d/%d %s: %d polígonos; acumulado=%d',i+1,len(occupied),cell['tile'],len(clipped),len(features))
     metadata['tile_count'] = len(occupied)
     metadata['polygon_note'] = 'polygons fragmented at 5-degree processing grid; counts are not fire events'
-    geometries = {name: geometry.getInfo() for name,geometry in roi.items()}
+    geometries = {name: mapping(geometry) for name,geometry in roi.items()}
     metadata['feature_count'] = len(features)
     metadata['native_scale_m'] = scale.getInfo()
     (output/'burned_europe.geojson').write_text(json.dumps({'type':'FeatureCollection','features':features}),encoding='utf-8')

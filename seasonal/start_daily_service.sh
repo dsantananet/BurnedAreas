@@ -16,4 +16,4 @@ fi
     --env-file "$PRIVATE/runtime.env" -e GEE_KEY_FILE=/private/service-account.json \
     -v "$PRIVATE/service-account.json:/private/service-account.json:ro" \
     -v "$BASE/outputs:/outputs" -v "$BASE:/app:ro" \
-    --entrypoint python ignispyro/burned-areas-gee:1.0 -u /app/daily_runner.py
+    --entrypoint python ignispyro/burned-areas-gee:1.1 -u /app/daily_runner.py
