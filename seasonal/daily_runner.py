@@ -13,7 +13,7 @@ while True:
     already_done = False
     try:
         with psycopg.connect(os.environ['DATABASE_URL'],connect_timeout=15) as conn:
-            last = conn.execute("SELECT max(finished_at) FROM runs WHERE year=%s AND status='completed'",(year,)).fetchone()[0]
+            last = conn.execute("SELECT max(finished_at) FROM runs WHERE year=%s AND source='MODIS/061/MCD64A1' AND status='completed'",(year,)).fetchone()[0]
             already_done = bool(last and last.astimezone(timezone.utc).date()==now.date())
     except Exception as exc:
         logging.error('Verificação inicial da base falhou: %s',type(exc).__name__)
