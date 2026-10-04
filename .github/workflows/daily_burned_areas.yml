@@ -2,12 +2,25 @@ name: Deteção Diária e Exportação via Rclone
 
 on:
   schedule:
-    - cron: '0 3 * * *'  # Executa diariamente às 03:00 UTC
-  workflow_dispatch:     # Execução manual pelo botão no GitHub
+    - cron: '0 3 * * *'
+  workflow_dispatch:
+    inputs:
+      export_drive:
+        description: Enviar resultados para Google Drive (requer OAuth)
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: burned-areas-daily
+  cancel-in-progress: false
 
 jobs:
   run-gee-rclone:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
       - name: Checkout Código
         uses: actions/checkout@v4
@@ -17,40 +30,59 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Dependências (Earth Engine API)
-        run: |
-          python -m pip install --upgrade pip
-          pip install earthengine-api
-
-      - name: Instalar Rclone
-        run: |
-          sudo curl https://rclone.org/install.sh | sudo bash
+      - name: Instalar Dependências
+        run: pip install earthengine-api
 
       - name: Executar Deteção de Áreas Ardidas
         env:
           GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
-        run: |
-          python detect_burnt_areas.py
+        run: python detect_burnt_areas.py
 
-      - name: Enviar GeoJSON para o Google Drive via Rclone
+      - name: Preservar GeoJSON e relatório
+        uses: actions/upload-artifact@v4
+        with:
+          name: burned-areas-${{ github.run_id }}
+          path: outputs/
+          if-no-files-found: error
+          retention-days: 90
+
+      - name: Resumo do processamento
+        run: |
+          python - <<'PY'
+          import json, os
+          with open('outputs/run_status.json') as f:
+              report = json.load(f)
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+              f.write('## Resultado da deteção\n\n')
+              for key, value in report.items():
+                  f.write(f'- {key}: {value}\n')
+              if report['status'] != 'processed':
+                  f.write('\n**Dados insuficientes: GeoJSON vazio não confirma ausência de incêndios.**\n')
+          PY
+
+      - name: Validar autenticação Google Drive
+        if: github.event_name == 'schedule' || inputs.export_drive
         env:
-          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
+          DRIVE_TOKEN: ${{ secrets.RCLONE_DRIVE_TOKEN }}
         run: |
-          # Criar ficheiro de credenciais temporário
-          echo "$GEE_SERVICE_ACCOUNT_KEY" > sa_key.json
+          if [ -z "$DRIVE_TOKEN" ]; then
+            echo '::error::Configurar RCLONE_DRIVE_TOKEN com OAuth do utilizador. A conta de serviço GEE não tem quota no Meu disco. Resultados preservados nos artefactos.'
+            exit 1
+          fi
 
-          # Configurar o Rclone dinamicamente para usar a Service Account
-          mkdir -p ~/.config/rclone
-          cat <<EOF > ~/.config/rclone/rclone.conf
-          [gdrive]
-          type = drive
-          scope = drive
-          service_account_file = $(pwd)/sa_key.json
-          root_folder_id = 1BoyO9QNldRid_j2G8Q8qIS9GkpfSDI_X
-          EOF
+      - name: Instalar Rclone
+        if: github.event_name == 'schedule' || inputs.export_drive
+        run: sudo apt-get update && sudo apt-get install -y rclone
 
-          # Executar a cópia direta para o Google Drive
-          rclone copy ./outputs gdrive: -v
-
-          # Apagar a chave por segurança
-          rm sa_key.json
+      - name: Enviar resultados para Google Drive com OAuth
+        if: github.event_name == 'schedule' || inputs.export_drive
+        env:
+          RCLONE_CONFIG_GDRIVE_TYPE: drive
+          RCLONE_CONFIG_GDRIVE_SCOPE: drive
+          RCLONE_CONFIG_GDRIVE_TOKEN: ${{ secrets.RCLONE_DRIVE_TOKEN }}
+          RCLONE_CONFIG_GDRIVE_CLIENT_ID: ${{ secrets.RCLONE_DRIVE_CLIENT_ID }}
+          RCLONE_CONFIG_GDRIVE_CLIENT_SECRET: ${{ secrets.RCLONE_DRIVE_CLIENT_SECRET }}
+          RCLONE_CONFIG_GDRIVE_ROOT_FOLDER_ID: 1BoyO9QNldRid_j2G8Q8qIS9GkpfSDI_X
+        run: |
+          rclone copy ./outputs gdrive: --include '*.geojson' --include 'run_status.json' --retries 3
+          rclone check ./outputs gdrive: --include '*.geojson' --include 'run_status.json' --one-way
