@@ -33,6 +33,9 @@ jobs:
       - name: Instalar Dependências
         run: pip install earthengine-api
 
+      - name: Verificar regressões de datas e dados em falta
+        run: python -m unittest discover -s tests -v
+
       - name: Executar Deteção de Áreas Ardidas
         env:
           GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
