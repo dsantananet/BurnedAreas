@@ -3,3 +3,5 @@ outputs/
 *.pyc
 sa_key.json
 rclone.conf
+.venv/
+seasonal_outputs/

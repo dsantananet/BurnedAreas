@@ -31,7 +31,7 @@ jobs:
           python-version: '3.10'
 
       - name: Instalar Dependências
-        run: pip install earthengine-api
+        run: pip install -r seasonal/requirements.txt
 
       - name: Verificar regressões de datas e dados em falta
         run: python -m unittest discover -s tests -v
