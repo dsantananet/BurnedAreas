@@ -161,18 +161,21 @@ def store(conn, run_id, year, metadata, geometries, features):
                 VALUES(%s,%s,ST_Multi(ST_CollectionExtract(ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(%s),4326)),3)))
                 ON CONFLICT(name) DO UPDATE SET definition=excluded.definition,geom=excluded.geom''',
                 (name,metadata['region_definition'],json.dumps(geom)))
+        records = []
         for feature in features:
             geom = json.dumps(feature['geometry'],sort_keys=True,separators=(',',':'))
             doy = int(feature['properties']['burn_doy'])
             burn_date = date(year,1,1)+timedelta(days=doy-1)
             feature_id = hashlib.sha256((str(doy)+geom).encode()).hexdigest()
-            conn.execute('''WITH g AS (SELECT ST_Multi(ST_CollectionExtract(
+            records.append((geom,run_id,feature_id,burn_date,float(feature['properties']['sum'])))
+        with conn.cursor() as cursor:
+            cursor.executemany('''WITH g AS (SELECT ST_Multi(ST_CollectionExtract(
                 ST_MakeValid(ST_SetSRID(ST_GeomFromGeoJSON(%s),4326)),3)) geom)
                 INSERT INTO burned_polygons(run_id,feature_id,burn_date,raster_area_ha,geometry_area_ha,geom)
                 SELECT %s,%s,%s,%s,ST_Area(geom::geography)/10000.0,geom FROM g
                 WHERE NOT ST_IsEmpty(geom) AND ST_Area(geom::geography)>0
                 ON CONFLICT(run_id,feature_id) DO NOTHING''',
-                (geom,run_id,feature_id,burn_date,float(feature['properties']['sum'])))
+                records)
         conn.execute('''UPDATE runs SET status=%s,finished_at=now(),latest_source_month=%s,metadata=%s WHERE id=%s''',
             ('completed' if metadata['available_months'] else 'no_data',metadata['latest_source_month'],Jsonb(metadata),run_id))
 
@@ -182,6 +185,7 @@ def main():
     parser.add_argument('--year',type=int,default=datetime.now(timezone.utc).year)
     parser.add_argument('--output',type=Path,default=Path('seasonal_outputs'))
     parser.add_argument('--extract-only',action='store_true')
+    parser.add_argument('--import-directory',type=Path,help='Importar extração já concluída, sem recalcular GEE')
     args = parser.parse_args()
     start,end = season_dates(args.year)
     run_id = uuid.uuid4()
@@ -196,8 +200,18 @@ def main():
                 return
             conn.execute('''INSERT INTO runs(id,year,source,status,requested_start,requested_end_exclusive)
                 VALUES(%s,%s,%s,'running',%s,%s)''',(run_id,args.year,SOURCE,start,end))
-        authenticate()
-        metadata,geometries,features = extract(args.year,start,end,output)
+        if args.import_directory:
+            directory = args.import_directory
+            metadata = json.loads((directory/'availability.json').read_text(encoding='utf-8'))
+            if metadata['requested_start'] != start.isoformat():
+                raise ValueError('Ano da extração não corresponde ao ano pedido.')
+            geometries = json.loads((directory/'regions.json').read_text(encoding='utf-8'))
+            features = json.loads((directory/'burned_europe.geojson').read_text(encoding='utf-8'))['features']
+            metadata['imported_from_run'] = directory.name
+            output.mkdir(parents=True,exist_ok=True)
+        else:
+            authenticate()
+            metadata,geometries,features = extract(args.year,start,end,output)
         if conn:
             store(conn,run_id,args.year,metadata,geometries,features)
             rows = conn.execute('SELECT region,year,burn_month,polygons,area_ha FROM resumo_mensal WHERE year=%s ORDER BY region,burn_month',(args.year,)).fetchall()

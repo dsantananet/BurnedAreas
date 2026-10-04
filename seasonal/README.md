@@ -10,6 +10,8 @@ produto mensal de áreas ardidas, resolução nominal 500m. É diferente dos
 candidatos dNBR Sentinel-2 a20m do script diário original, que fica preservado.
 O dia de queima é aproximado. A classificação não equivale a perímetros oficiais
 nem garante deteção de pequenos incêndios.
+Inclui queimas em terras agrícolas e noutras coberturas; não é uma seleção de
+incêndios florestais exclusivamente.
 
 Portugal corresponde ao continente, recortado pelos limites LSIB.
 Europa usa países classificados Europa no LSIB2017, mais Turquia/Chipre,
