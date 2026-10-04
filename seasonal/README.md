@@ -37,7 +37,8 @@ com área zero. O diário procura produtos novos automaticamente.
 
 ## Atualização diária
 
-`daily_runner.py` faz uma extração inicial e depois uma atualização às04:30UTC.
+`daily_runner.py` atualiza ao arrancar se ainda não houve uma execução concluída
+nesse dia e depois faz uma atualização às04:30UTC.
 Falhas são registadas e repetidas após uma hora. Antes de maio, continua a época
 do ano anterior, permitindo concluir os produtos publicados com atraso.
 O contentor `burned_areas_gee_daily` reinicia automaticamente com Docker/QNAP.

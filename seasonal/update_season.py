@@ -194,7 +194,7 @@ def main():
     conn = None
     try:
         if not args.extract_only:
-            conn = psycopg.connect(os.environ['DATABASE_URL'],autocommit=True)
+            conn = psycopg.connect(os.environ['DATABASE_URL'],autocommit=True,connect_timeout=15)
             if not conn.execute('SELECT pg_try_advisory_lock(%s)',(84621000+args.year,)).fetchone()[0]:
                 logging.info('Outra atualização da época está em curso; execução omitida.')
                 return
