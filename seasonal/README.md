@@ -25,6 +25,8 @@ evitar contar várias vezes o mesmo píxel em meses adjacentes. A camada represe
 a superfície que ardeu pelo menos uma vez; não separa uma segunda queima no mesmo
 píxel. Vetorização em grelha nativa MODIS (~463m), processada em blocos de5°.
 As contagens de polígonos não são contagens de incêndios.
+Cada pedido inclui uma margem de1km; o resultado é recortado pelo bloco sem
+sobreposição, preservando os píxeis que atravessam fronteiras dos blocos.
 
 ## Disponibilidade verificada em04/10/2026
 
@@ -69,3 +71,5 @@ SELECT count(*),sum(area_ha) FROM areas_portugal WHERE year=2026;
 Saídas por UUID: metadados, blocosGeoJSON, EuropaGeoJSON; depois da carga,
 PortugalGeoJSON e resumo da base. Geometrias válidas e área geodésica calculadas
 no PostGIS. Credenciais e palavras-passe não pertencem a estas saídas.
+`raster_area_ha` conserva a soma do segmento raster antes dos recortes e das
+margens; para totais regionais, usar as áreas geométricas das vistas/resumos.

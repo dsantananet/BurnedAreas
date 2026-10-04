@@ -110,7 +110,7 @@ def extract(year, start, end, output):
     for i, cell in enumerate(occupied):
         tile = ee.Geometry.Rectangle(cell['bounds'],geodesic=False)
         vectors = burn.addBands(pixel_area).reduceToVectors(
-            geometry=tile,crs=projection,scale=scale,geometryType='polygon',
+            geometry=tile.buffer(1000,1),crs=projection,scale=scale,geometryType='polygon',
             eightConnected=False,labelProperty='burn_doy',reducer=ee.Reducer.sum(),
             maxPixels=1e8,tileScale=4,geometryInNativeProjection=False,
         ).map(lambda f: ee.Feature(f).setGeometry(ee.Feature(f).geometry().intersection(tile,1)))
@@ -144,7 +144,9 @@ def extract(year, start, end, output):
             json.dumps({'type':'FeatureCollection','features':clipped}),encoding='utf-8')
         logging.info('Bloco %d/%d %s: %d polígonos; acumulado=%d',i+1,len(occupied),cell['tile'],len(clipped),len(features))
     metadata['tile_count'] = len(occupied)
-    metadata['polygon_note'] = 'polygons fragmented at 5-degree processing grid; counts are not fire events'
+    metadata['tile_margin_m'] = 1000
+    metadata['raster_area_note'] = 'pre-clipping segment pixel-area sum; use geometry_area_ha for regional totals'
+    metadata['polygon_note'] = '5-degree blocks with 1km overlap then clipped to disjoint tile boundaries; counts are not fire events'
     geometries = {name: mapping(geometry) for name,geometry in roi.items()}
     metadata['feature_count'] = len(features)
     metadata['native_scale_m'] = scale.getInfo()
