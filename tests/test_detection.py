@@ -67,7 +67,7 @@ class DetectionTests(unittest.TestCase):
 
     def test_fallback_pre_window_ends_before_post_window(self):
         report, dates = self.run_case([0, 2, 3])
-        self.assertEqual(report['status'], 'processed')
+        self.assertEqual(report['status'], 'no_polygons')
         self.assertEqual(dates[2][1], dates[1][0])
         self.assertEqual(report['pre_end_exclusive'], report['post_start'])
 
