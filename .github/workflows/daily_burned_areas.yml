@@ -28,7 +28,7 @@ jobs:
       - name: Configurar Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.10'
+          python-version: '3.11'
 
       - name: Instalar Dependências
         run: pip install -r seasonal/requirements.txt
@@ -40,6 +40,24 @@ jobs:
         env:
           GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
         run: python detect_burnt_areas.py
+
+      - name: Ler resultado do processamento
+        id: resultado
+        run: |
+          python - <<'PY'
+          import json, os
+          with open('outputs/run_status.json', encoding='utf-8') as f:
+              report = json.load(f)
+
+          status = report.get('status', 'unknown')
+          count = int(report.get('feature_count', 0))
+          export_drive = 'true' if status == 'processed' and count > 0 else 'false'
+
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write(f"status={status}\n")
+              f.write(f"feature_count={count}\n")
+              f.write(f"export_drive={export_drive}\n")
+          PY
 
       - name: Preservar GeoJSON e relatório
         uses: actions/upload-artifact@v4
@@ -53,32 +71,52 @@ jobs:
         run: |
           python - <<'PY'
           import json, os
-          with open('outputs/run_status.json') as f:
+
+          with open('outputs/run_status.json', encoding='utf-8') as f:
               report = json.load(f)
-          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a') as f:
+
+          status = report.get('status')
+          count = int(report.get('feature_count', 0))
+
+          with open(os.environ['GITHUB_STEP_SUMMARY'], 'a', encoding='utf-8') as f:
               f.write('## Resultado da deteção\n\n')
+
+              if status == 'no_polygons':
+                  f.write('✅ **Processamento concluído sem erro: não foram detetados polígonos de área ardida.**\n\n')
+              elif status in ('no_post_images', 'no_pre_images'):
+                  f.write('⚠️ **Processamento concluído sem erro, mas não existem imagens Sentinel-2 suficientes para confirmar presença ou ausência de polígonos.**\n\n')
+              elif status == 'processed':
+                  f.write(f'✅ **Processamento concluído: {count} polígonos detetados.**\n\n')
+              else:
+                  f.write(f'⚠️ **Estado inesperado do processamento: {status}.**\n\n')
+
               for key, value in report.items():
                   f.write(f'- {key}: {value}\n')
-              if report['status'] != 'processed':
-                  f.write('\n**Dados insuficientes: GeoJSON vazio não confirma ausência de incêndios.**\n')
           PY
 
+      - name: Informação quando não há dados para exportar
+        if: steps.resultado.outputs.export_drive != 'true'
+        run: |
+          echo "Não há polígonos válidos para exportar para o Google Drive. O workflow termina com sucesso."
+          echo "Estado: ${{ steps.resultado.outputs.status }}"
+          echo "Polígonos: ${{ steps.resultado.outputs.feature_count }}"
+
       - name: Validar autenticação Google Drive
-        if: github.event_name == 'schedule' || inputs.export_drive
+        if: steps.resultado.outputs.export_drive == 'true' && (github.event_name == 'schedule' || inputs.export_drive)
         env:
           DRIVE_TOKEN: ${{ secrets.RCLONE_DRIVE_TOKEN }}
         run: |
           if [ -z "$DRIVE_TOKEN" ]; then
-            echo '::error::Configurar RCLONE_DRIVE_TOKEN com OAuth do utilizador. A conta de serviço GEE não tem quota no Meu disco. Resultados preservados nos artefactos.'
+            echo '::error::Foram detetados polígonos, mas falta configurar RCLONE_DRIVE_TOKEN. Os resultados foram preservados nos artefactos.'
             exit 1
           fi
 
       - name: Instalar Rclone
-        if: github.event_name == 'schedule' || inputs.export_drive
+        if: steps.resultado.outputs.export_drive == 'true' && (github.event_name == 'schedule' || inputs.export_drive)
         run: sudo apt-get update && sudo apt-get install -y rclone
 
       - name: Enviar resultados para Google Drive com OAuth
-        if: github.event_name == 'schedule' || inputs.export_drive
+        if: steps.resultado.outputs.export_drive == 'true' && (github.event_name == 'schedule' || inputs.export_drive)
         env:
           RCLONE_CONFIG_GDRIVE_TYPE: drive
           RCLONE_CONFIG_GDRIVE_SCOPE: drive
