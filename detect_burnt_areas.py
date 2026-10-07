@@ -80,6 +80,11 @@ else:
     )
 
     geojson_data = burned_vectors.getInfo()
+    if len(geojson_data.get('features', [])) == 0:
+        status = 'no_polygons'
+        print("Processamento concluído: não foram detetados polígonos de área ardida.")
+    else:
+        print(f"Processamento concluído: {len(geojson_data['features'])} polígonos detetados.")
 
 # ---------------------------------------------------------------------------
 # GUARDAR FICHEIRO LOCALMENTE PARA O RCLONE ENVIAR
