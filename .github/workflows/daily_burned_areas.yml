@@ -51,12 +51,9 @@ jobs:
 
           status = report.get('status', 'unknown')
           count = int(report.get('feature_count', 0))
-          export_drive = 'true' if status == 'processed' and count > 0 else 'false'
-
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write(f"status={status}\n")
               f.write(f"feature_count={count}\n")
-              f.write(f"export_drive={export_drive}\n")
           PY
 
       - name: Preservar GeoJSON e relatório
@@ -94,29 +91,25 @@ jobs:
                   f.write(f'- {key}: {value}\n')
           PY
 
-      - name: Informação quando não há dados para exportar
-        if: steps.resultado.outputs.export_drive != 'true'
-        run: |
-          echo "Não há polígonos válidos para exportar para o Google Drive. O workflow termina com sucesso."
-          echo "Estado: ${{ steps.resultado.outputs.status }}"
-          echo "Polígonos: ${{ steps.resultado.outputs.feature_count }}"
-
-      - name: Validar autenticação Google Drive
-        if: steps.resultado.outputs.export_drive == 'true' && (github.event_name == 'schedule' || inputs.export_drive)
+      - name: Verificar autenticação Google Drive
+        id: drive_auth
+        if: github.event_name == 'schedule' || inputs.export_drive
         env:
           DRIVE_TOKEN: ${{ secrets.RCLONE_DRIVE_TOKEN }}
         run: |
           if [ -z "$DRIVE_TOKEN" ]; then
-            echo '::error::Foram detetados polígonos, mas falta configurar RCLONE_DRIVE_TOKEN. Os resultados foram preservados nos artefactos.'
-            exit 1
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::RCLONE_DRIVE_TOKEN não está configurado. Os ficheiros ficam preservados nos artefactos do GitHub, mas não podem ser enviados para o Google Drive."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Instalar Rclone
-        if: steps.resultado.outputs.export_drive == 'true' && (github.event_name == 'schedule' || inputs.export_drive)
+        if: (github.event_name == 'schedule' || inputs.export_drive) && steps.drive_auth.outputs.configured == 'true'
         run: sudo apt-get update && sudo apt-get install -y rclone
 
-      - name: Enviar resultados para Google Drive com OAuth
-        if: steps.resultado.outputs.export_drive == 'true' && (github.event_name == 'schedule' || inputs.export_drive)
+      - name: Enviar resultados diários para Google Drive com OAuth
+        if: (github.event_name == 'schedule' || inputs.export_drive) && steps.drive_auth.outputs.configured == 'true'
         env:
           RCLONE_CONFIG_GDRIVE_TYPE: drive
           RCLONE_CONFIG_GDRIVE_SCOPE: drive
