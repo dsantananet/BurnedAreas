@@ -1,0 +1,66 @@
+name: Forest indices and perimeter severity
+on:
+  schedule:
+    - cron: '40 5 * * *'
+  workflow_dispatch:
+    inputs:
+      as_of:
+        description: End-exclusive date (YYYY-MM-DD); blank means today UTC
+        default: ''
+      max_events:
+        description: Maximum waiting perimeters per execution
+        default: '15'
+permissions:
+  contents: write
+concurrency:
+  group: forest-products
+  cancel-in-progress: false
+jobs:
+  calculate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r forest/requirements.txt
+      - run: python -m unittest discover -s tests -p test_forest.py -v
+      - name: Restore durable product ledger
+        run: |
+          if git ls-remote --exit-code origin refs/heads/forest-products >/dev/null 2>&1; then
+            git fetch origin forest-products
+            mkdir -p forest-products
+            git archive FETCH_HEAD | tar -x -C forest-products
+          fi
+      - name: Calculate actual GEE products
+        id: compute
+        continue-on-error: true
+        env:
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
+          AS_OF: ${{ inputs.as_of }}
+          MAX_EVENTS: ${{ inputs.max_events || '15' }}
+        run: python forest/pipeline.py --as-of "${AS_OF:-$(date -u +%F)}" --max-events "$MAX_EVENTS"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: forest-products-${{ github.run_id }}
+          path: forest-products/
+          if-no-files-found: error
+          retention-days: 90
+      - name: Publish metadata, maps and durable queue
+        if: always()
+        run: |
+          test -f forest-products/forest-status.json
+          cd forest-products
+          git init -b forest-products
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add .
+          git commit -m "GEE forest products $GITHUB_RUN_ID"
+          cd ..
+          git fetch ./forest-products forest-products
+          git push --force origin FETCH_HEAD:forest-products
+      - name: Report calculation failure
+        if: steps.compute.outcome == 'failure'
+        run: exit 1

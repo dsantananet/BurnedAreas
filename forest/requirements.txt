@@ -1,0 +1,5 @@
+earthengine-api==1.7.46
+matplotlib>=3.9,<4
+numpy>=2,<3
+requests>=2.32,<3
+Pillow>=11,<13
