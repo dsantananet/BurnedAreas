@@ -61,7 +61,10 @@ def authenticate():
     raw = os.environ['GEE_SERVICE_ACCOUNT_KEY']
     key = json.loads(raw)
     creds = ee.ServiceAccountCredentials(key['client_email'], key_data=raw)
-    ee.Initialize(creds, project=os.environ.get('GEE_PROJECT') or key.get('project_id'))
+    # Match the existing working BurnedAreas authentication. The key's owning
+    # project need not be the Earth Engine quota project authorized for this account.
+    options = {'project': os.environ['GEE_PROJECT']} if os.environ.get('GEE_PROJECT') else {}
+    ee.Initialize(creds, **options)
     ee.data.setDeadline(180000)
     return ee
 
@@ -240,10 +243,15 @@ def process_event(ee, event, as_of, output):
 
 
 def run(args):
-    ee = authenticate()
     as_of = date.fromisoformat(args.as_of) if args.as_of else datetime.now(timezone.utc).date()
     output = Path(args.output)
     output.mkdir(parents=True, exist_ok=True)
+    try:
+        ee = authenticate()
+    except Exception as exc:
+        save_json(output/'forest-status.json', {'generated_at': datetime.now(timezone.utc).isoformat(), 'as_of': as_of.isoformat(),
+                  'status': 'authentication_failed', 'error_type': type(exc).__name__, 'method': VERSION})
+        raise SystemExit('Earth Engine authentication failed; product state preserved') from None
     old = output/'events.json'
     events = json.loads(old.read_text(encoding='utf-8')) if old.exists() else {}
     if args.events:
