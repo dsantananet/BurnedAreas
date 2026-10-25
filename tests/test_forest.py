@@ -50,3 +50,22 @@ class ForestTests(unittest.TestCase):
             self.assertEqual(status['completed'],2)
             self.assertEqual(status['status'],'partial_failure')
             self.assertIn('missing_batch:7',status['errors'])
+
+    def test_old_batch_cannot_be_used_as_a_current_execution(self):
+        merge_spec=importlib.util.spec_from_file_location('merge_current',Path(__file__).parents[1]/'forest/merge_batches.py')
+        mm=importlib.util.module_from_spec(merge_spec);merge_spec.loader.exec_module(mm)
+        with tempfile.TemporaryDirectory() as folder:
+            root=Path(folder);base=root/'in/forest-base';batch=root/'in/forest-shard-0'
+            base.mkdir(parents=True);batch.mkdir()
+            (base/'forest-status.json').write_text(json.dumps({'source_run_id':'current','status':'processed','errors':[]}))
+            (base/'events.json').write_text(json.dumps({'a':{'status':'queued'}}))
+            (batch/'forest-status.json').write_text(json.dumps({'source_run_id':'old','status':'processed','errors':[]}))
+            (batch/'events.json').write_text(json.dumps({'a':{'status':'processed','last_attempt':'2026-01-03'}}))
+            (batch/'old.png').write_bytes(b'old')
+            mm.merge(root/'in',root/'out','current')
+            result=json.loads((root/'out/events.json').read_text())
+            state=json.loads((root/'out/forest-status.json').read_text())
+            self.assertEqual(result['a']['status'],'queued')
+            self.assertIn('stale_batch:forest-shard-0',state['errors'])
+            self.assertFalse((root/'out/old.png').exists())
+            with self.assertRaises(ValueError):mm.merge(root/'in',root/'wrong','different')
