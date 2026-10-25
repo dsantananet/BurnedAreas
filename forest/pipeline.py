@@ -121,8 +121,9 @@ def plot_bars(values, labels, colors, path, title, unit):
 
 
 def national(ee, as_of, output):
-    country = ee.FeatureCollection('FAO/GAUL/2015/level0').filter(ee.Filter.eq('ADM0_NAME', 'Portugal')).geometry()
-    report = {'source': SOURCE, 'boundary': 'FAO/GAUL/2015/level0 · Portugal, limites generalizados de 2015',
+    country = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017').filter(ee.Filter.eq('country_na', 'Portugal')).geometry()
+    report = {'source': SOURCE, 'boundary': 'Continente: USDOS/LSIB_SIMPLE/2017; ilhas: USDOS/LSIB/2017 detalhado, recortado por região oceânica',
+              'generated_at': datetime.now(timezone.utc).isoformat(),
               'requested_end_exclusive': as_of.isoformat(), 'scale_m': 250, 'crs': 'EPSG:3035',
               'regions': [], 'status': 'processed', 'interpretation':
               'NDVI descreve verdura relativa; NDMI é um índice espectral de humidade, não humidade medida do combustível. '
@@ -130,7 +131,9 @@ def national(ee, as_of, output):
               'Janelas de 30 dias; a diferença para a janela anterior não é anomalia sazonal.'}
     for name, bounds in REGIONS.items():
         print('National region: '+name, flush=True)
-        region = country.intersection(ee.Geometry.Rectangle(bounds, geodesic=False), 100)
+        box = ee.Geometry.Rectangle(bounds, geodesic=False)
+        land = country if name=='continente' else ee.FeatureCollection('USDOS/LSIB/2017').filterBounds(box).geometry()
+        region = land.intersection(box, 100)
         if region.area(100).getInfo() < 1:
             report['regions'].append({'id': name, 'status': 'boundary_missing'})
             continue

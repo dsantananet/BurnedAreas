@@ -1,0 +1,31 @@
+name: National vegetation and moisture verification
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  indices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r forest/requirements.txt
+      - name: Verify mainland and archipelagos
+        env:
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
+        run: |
+          python -u - <<'PY'
+          from forest.pipeline import authenticate,national
+          from pathlib import Path
+          from datetime import datetime,timezone
+          output=Path('national-products');output.mkdir()
+          national(authenticate(),datetime.now(timezone.utc).date(),output)
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: national-products-${{ github.run_id }}
+          path: national-products/
+          if-no-files-found: error
