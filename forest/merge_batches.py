@@ -6,14 +6,22 @@ import sys
 from datetime import datetime, timezone
 
 
-def merge(source, target):
+def merge(source, target, run_id=None):
     source, target = Path(source), Path(target)
     target.mkdir(parents=True, exist_ok=True)
     base = source/'forest-base'
     report = json.loads((base/'forest-status.json').read_text())
+    if run_id and str(report.get('source_run_id'))!=str(run_id):
+        raise ValueError('Base products do not belong to this execution')
     errors = list(report.get('errors', []))
     events = {}
     for folder in [base]+sorted(source.glob('forest-shard-*')):
+        if folder!=base and run_id:
+            marker=folder/'forest-status.json'
+            batch_state=json.loads(marker.read_text()) if marker.exists() else {}
+            if str(batch_state.get('source_run_id'))!=str(run_id):
+                errors.append('stale_batch:'+folder.name)
+                continue
         for file in folder.glob('*'):
             if file.is_file() and file.name not in ('events.json','forest-status.json'):
                 shutil.copy2(file, target/file.name)
@@ -42,4 +50,4 @@ def merge(source, target):
 
 
 if __name__=='__main__':
-    merge(sys.argv[1],sys.argv[2])
+    merge(sys.argv[1],sys.argv[2],sys.argv[3] if len(sys.argv)>3 else None)

@@ -39,13 +39,9 @@ jobs:
           GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
           AS_OF: ${{ inputs.as_of }}
         run: python -u forest/pipeline.py --mode prepare --as-of "${AS_OF:-$(date -u +%F)}"
-      - uses: actions/upload-artifact@v4
+      - name: Preserve base products without artifact storage
         if: always()
-        with:
-          name: forest-base
-          path: forest-products/
-          if-no-files-found: error
-          retention-days: 30
+        run: bash forest/publish_products.sh forest-base forest-products
   severity:
     needs: prepare
     runs-on: ubuntu-latest
@@ -61,10 +57,15 @@ jobs:
         with:
           python-version: '3.11'
       - run: pip install -r forest/requirements.txt
-      - uses: actions/download-artifact@v4
-        with:
-          name: forest-base
-          path: forest-products
+      - name: Read base products for this execution
+        run: |
+          git fetch origin forest-base
+          mkdir -p forest-products
+          git archive FETCH_HEAD | tar -x -C forest-products
+          python - <<'PY'
+          import os,json
+          assert str(json.load(open('forest-products/forest-status.json'))['source_run_id'])==os.environ['GITHUB_RUN_ID']
+          PY
       - name: Calculate assigned perimeters
         continue-on-error: true
         env:
@@ -73,13 +74,11 @@ jobs:
           MAX_EVENTS: ${{ inputs.max_events || '120' }}
           SHARD: ${{ matrix.shard }}
         run: python -u forest/pipeline.py --mode severity --shard "$SHARD" --shards 8 --max-events "$MAX_EVENTS" --as-of "${AS_OF:-$(date -u +%F)}"
-      - uses: actions/upload-artifact@v4
+      - name: Preserve assigned batch without artifact storage
         if: always()
-        with:
-          name: forest-shard-${{ matrix.shard }}
-          path: forest-products/
-          if-no-files-found: error
-          retention-days: 30
+        env:
+          SHARD: ${{ matrix.shard }}
+        run: bash forest/publish_products.sh "forest-batch-$SHARD" forest-products
   publish:
     needs: [prepare, severity]
     if: always()
@@ -90,27 +89,20 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: forest-*
-          path: batches
-      - run: python forest/merge_batches.py batches forest-products
-      - uses: actions/upload-artifact@v4
-        with:
-          name: forest-products-${{ github.run_id }}
-          path: forest-products/
-          retention-days: 90
-      - name: Publish actual products with durable queue
+      - name: Read base and batch branches
         run: |
-          cd forest-products
-          git init -b forest-products
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add .
-          git commit -m "GEE forest products $GITHUB_RUN_ID"
-          cd ..
-          git fetch ./forest-products forest-products
-          git push --force origin FETCH_HEAD:refs/heads/forest-products
+          mkdir -p batches/forest-base
+          git fetch origin forest-base
+          git archive FETCH_HEAD | tar -x -C batches/forest-base
+          for shard in 0 1 2 3 4 5 6 7; do
+            if git fetch origin "forest-batch-$shard"; then
+              mkdir -p "batches/forest-shard-$shard"
+              git archive FETCH_HEAD | tar -x -C "batches/forest-shard-$shard"
+            fi
+          done
+      - run: python forest/merge_batches.py batches forest-products "$GITHUB_RUN_ID"
+      - name: Publish actual products with durable queue
+        run: bash forest/publish_products.sh forest-products forest-products
       - name: Fail visibly if any product failed
         run: |
           python - <<'PY'
