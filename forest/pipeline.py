@@ -290,7 +290,8 @@ def run(args):
         if event.get('active') is False or int(event['id'][:8],16)%args.shards!=args.shard:
             continue
         burn = date.fromisoformat(event['feature']['properties']['burn_date'])
-        finalized = event.get('status') in ('processed','partial') and event.get('method')==VERSION and as_of>=burn+timedelta(days=90)
+        final_age = 46 if event.get('status')=='processed' else 90
+        finalized = event.get('status') in ('processed','partial') and event.get('method')==VERSION and as_of>=burn+timedelta(days=final_age)
         if finalized or processed>=args.max_events or args.mode=='prepare':
             continue
         event['last_attempt'] = datetime.now(timezone.utc).isoformat()
