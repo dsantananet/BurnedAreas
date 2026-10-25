@@ -121,14 +121,15 @@ def plot_bars(values, labels, colors, path, title, unit):
 
 
 def national(ee, as_of, output):
-    country = ee.FeatureCollection('USDOS/LSIB_SIMPLE/2017').filter(ee.Filter.eq('country_na', 'Portugal')).geometry()
-    report = {'source': SOURCE, 'boundary': 'USDOS/LSIB_SIMPLE/2017 · Portugal, limites generalizados',
+    country = ee.FeatureCollection('FAO/GAUL/2015/level0').filter(ee.Filter.eq('ADM0_NAME', 'Portugal')).geometry()
+    report = {'source': SOURCE, 'boundary': 'FAO/GAUL/2015/level0 · Portugal, limites generalizados de 2015',
               'requested_end_exclusive': as_of.isoformat(), 'scale_m': 250, 'crs': 'EPSG:3035',
               'regions': [], 'status': 'processed', 'interpretation':
               'NDVI descreve verdura relativa; NDMI é um índice espectral de humidade, não humidade medida do combustível. '
               'Médias sobre píxeis válidos em grelha de 250 m; sem inferir áreas sem observação. '
               'Janelas de 30 dias; a diferença para a janela anterior não é anomalia sazonal.'}
     for name, bounds in REGIONS.items():
+        print('National region: '+name, flush=True)
         region = country.intersection(ee.Geometry.Rectangle(bounds, geodesic=False), 100)
         if region.area(100).getInfo() < 1:
             report['regions'].append({'id': name, 'status': 'boundary_missing'})
@@ -186,6 +187,9 @@ def discover_events(ee, as_of, existing):
     projection = ee.Image(col.first()).select('BurnDate').projection()
     fc = layer.reduceToVectors(geometry=region, crs=projection, scale=projection.nominalScale(), labelProperty='burn_doy', geometryType='polygon', eightConnected=False, maxPixels=1e8)
     features = fc.getInfo()['features']
+    for old in existing.values():
+        if old.get('source')=='MODIS/061/MCD64A1':
+            old['active'] = False
     added = 0
     for f in features:
         f['properties']['burn_date'] = (start+timedelta(days=int(f['properties']['burn_doy'])-1)).isoformat()
@@ -194,7 +198,11 @@ def discover_events(ee, as_of, existing):
             existing[key] = {'id': key, 'feature': f, 'source': 'MODIS/061/MCD64A1', 'source_scale_m': 500,
                              'status': 'queued', 'note': 'Polígono de classificação satélite, não ocorrência nem perímetro oficial.'}
             added += 1
-    return existing, {'status': 'processed', 'year': as_of.year, 'source_image_count': count, 'source_polygons': len(features), 'new_events': added}
+        existing[key]['active'] = True
+    latest = col.aggregate_max('system:time_start').getInfo()
+    return existing, {'status': 'processed', 'year': as_of.year, 'source_image_count': count, 'source_polygons': len(features), 'new_events': added,
+                      'latest_source_month': datetime.fromtimestamp(latest/1000, timezone.utc).date().isoformat() if latest else None,
+                      'note': 'Produto mensal com atraso; polígonos supersedidos são preservados mas excluídos da fila ativa.'}
 
 
 def process_event(ee, event, as_of, output):
@@ -260,23 +268,27 @@ def run(args):
             events.setdefault(key, {'id': key, 'feature': feature, 'source': 'supplied_perimeter', 'status': 'queued'})
     # Each independent product can fail while preserving previous products and its error state.
     errors = []
-    try:
-        national_report = national(ee, as_of, output)
-    except Exception as exc:
-        national_report = {'status': 'failed', 'error_type': type(exc).__name__}
-        errors.append('national')
-    try:
-        events, discovery = discover_events(ee, as_of, events)
-    except Exception as exc:
-        discovery = {'status': 'failed', 'error_type': type(exc).__name__}
-        errors.append('discovery')
+    national_report, discovery = {}, {}
+    if args.mode!='severity':
+        try:
+            national_report = national(ee, as_of, output)
+        except Exception as exc:
+            national_report = {'status': 'failed', 'error_type': type(exc).__name__}
+            errors.append('national')
+        try:
+            events, discovery = discover_events(ee, as_of, events)
+        except Exception as exc:
+            discovery = {'status': 'failed', 'error_type': type(exc).__name__}
+            errors.append('discovery')
     processed = 0
     # Oldest waiting events first. Finalized products are only rerun if the method changes.
-    queue = sorted(events.values(), key=lambda e: (e.get('last_attempt', ''), e['feature']['properties']['burn_date'], e['id']))
+    queue = sorted(events.values(), key=lambda e: (e.get('last_attempt', ''), -date.fromisoformat(e['feature']['properties']['burn_date']).toordinal(), e['id']))
     for event in queue:
+        if event.get('active') is False or int(event['id'][:8],16)%args.shards!=args.shard:
+            continue
         burn = date.fromisoformat(event['feature']['properties']['burn_date'])
-        finalized = event.get('status')=='processed' and event.get('method')==VERSION and as_of>=burn+timedelta(days=46)
-        if finalized or processed>=args.max_events:
+        finalized = event.get('status') in ('processed','partial') and event.get('method')==VERSION and as_of>=burn+timedelta(days=90)
+        if finalized or processed>=args.max_events or args.mode=='prepare':
             continue
         event['last_attempt'] = datetime.now(timezone.utc).isoformat()
         try:
@@ -285,12 +297,13 @@ def run(args):
             event.update(status='retry_pending', error_type=type(exc).__name__)
             errors.append('event:'+event['id'])
         processed += 1
+        print('Severity '+event['id']+': '+event['status'], flush=True)
         save_json(output/'events.json', events)
     save_json(output/'events.json', events)
     report = {'generated_at': datetime.now(timezone.utc).isoformat(), 'as_of': as_of.isoformat(), 'method': VERSION,
               'national': national_report, 'discovery': discovery, 'events_count': len(events),
               'events_attempted': processed, 'queue_remaining': sum(e.get('status')!='processed' for e in events.values()),
-              'errors': errors, 'status': 'partial_failure' if errors else 'processed',
+              'errors': errors, 'status': 'partial_failure' if errors else 'processed', 'shard': args.shard, 'shards': args.shards,
               'severity_note': 'dNBR pré menos pós; classes exploratórias, não validadas no terreno. Alteração espectral não é intensidade de fogo.',
               'sources': ['https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED',
                           'https://burnseverity.cr.usgs.gov/glossary']}
@@ -306,4 +319,7 @@ if __name__ == '__main__':
     parser.add_argument('--output', default='forest-products')
     parser.add_argument('--events', help='GeoJSON Polygon/MultiPolygon features with properties.burn_date (ISO date)')
     parser.add_argument('--max-events', type=int, default=15)
+    parser.add_argument('--mode', choices=['all','prepare','severity'], default='all')
+    parser.add_argument('--shard', type=int, default=0)
+    parser.add_argument('--shards', type=int, default=1)
     run(parser.parse_args())

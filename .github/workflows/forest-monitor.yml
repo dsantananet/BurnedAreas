@@ -1,24 +1,24 @@
 name: Forest indices and perimeter severity
 on:
   schedule:
-    - cron: '40 5 * * *'
+    - cron: '40 */6 * * *'
   workflow_dispatch:
     inputs:
       as_of:
-        description: End-exclusive date (YYYY-MM-DD); blank means today UTC
+        description: End-exclusive date; blank means today UTC
         default: ''
       max_events:
-        description: Maximum waiting perimeters per execution
-        default: '15'
+        description: Maximum waiting perimeters per batch (8 batches)
+        default: '120'
 permissions:
   contents: write
 concurrency:
   group: forest-products
   cancel-in-progress: false
 jobs:
-  calculate:
+  prepare:
     runs-on: ubuntu-latest
-    timeout-minutes: 55
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -33,25 +33,75 @@ jobs:
             mkdir -p forest-products
             git archive FETCH_HEAD | tar -x -C forest-products
           fi
-      - name: Calculate actual GEE products
-        id: compute
+      - name: National indices and perimeter discovery
         continue-on-error: true
         env:
           GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
           AS_OF: ${{ inputs.as_of }}
-          MAX_EVENTS: ${{ inputs.max_events || '15' }}
-        run: python forest/pipeline.py --as-of "${AS_OF:-$(date -u +%F)}" --max-events "$MAX_EVENTS"
+        run: python -u forest/pipeline.py --mode prepare --as-of "${AS_OF:-$(date -u +%F)}"
       - uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: forest-products-${{ github.run_id }}
+          name: forest-base
           path: forest-products/
           if-no-files-found: error
-          retention-days: 90
-      - name: Publish metadata, maps and durable queue
+          retention-days: 30
+  severity:
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    strategy:
+      fail-fast: false
+      max-parallel: 8
+      matrix:
+        shard: [0, 1, 2, 3, 4, 5, 6, 7]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install -r forest/requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: forest-base
+          path: forest-products
+      - name: Calculate assigned perimeters
+        continue-on-error: true
+        env:
+          GEE_SERVICE_ACCOUNT_KEY: ${{ secrets.GEE_SERVICE_ACCOUNT_KEY }}
+          AS_OF: ${{ inputs.as_of }}
+          MAX_EVENTS: ${{ inputs.max_events || '120' }}
+          SHARD: ${{ matrix.shard }}
+        run: python -u forest/pipeline.py --mode severity --shard "$SHARD" --shards 8 --max-events "$MAX_EVENTS" --as-of "${AS_OF:-$(date -u +%F)}"
+      - uses: actions/upload-artifact@v4
         if: always()
+        with:
+          name: forest-shard-${{ matrix.shard }}
+          path: forest-products/
+          if-no-files-found: error
+          retention-days: 30
+  publish:
+    needs: [prepare, severity]
+    if: always()
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: forest-*
+          path: batches
+      - run: python forest/merge_batches.py batches forest-products
+      - uses: actions/upload-artifact@v4
+        with:
+          name: forest-products-${{ github.run_id }}
+          path: forest-products/
+          retention-days: 90
+      - name: Publish actual products with durable queue
         run: |
-          test -f forest-products/forest-status.json
           cd forest-products
           git init -b forest-products
           git config user.name 'github-actions[bot]'
@@ -60,7 +110,11 @@ jobs:
           git commit -m "GEE forest products $GITHUB_RUN_ID"
           cd ..
           git fetch ./forest-products forest-products
-          git push --force origin FETCH_HEAD:forest-products
-      - name: Report calculation failure
-        if: steps.compute.outcome == 'failure'
-        run: exit 1
+          git push --force origin FETCH_HEAD:refs/heads/forest-products
+      - name: Fail visibly if any product failed
+        run: |
+          python - <<'PY'
+          import json
+          status=json.load(open('forest-products/forest-status.json'))
+          assert status['status'] == 'processed', status['status']
+          PY
