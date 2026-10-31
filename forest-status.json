@@ -1,0 +1,20 @@
+{
+  "generated_at": "2026-10-31T06:15:33.563430+00:00",
+  "as_of": "2026-10-31",
+  "method": "forest-v1-scl-20m-20261025",
+  "national": {},
+  "discovery": {},
+  "events_count": 678,
+  "events_attempted": 0,
+  "queue_remaining": 8,
+  "errors": [],
+  "status": "processed",
+  "shard": 5,
+  "shards": 8,
+  "severity_note": "dNBR pré menos pós; classes exploratórias, não validadas no terreno. Alteração espectral não é intensidade de fogo.",
+  "sources": [
+    "https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED",
+    "https://burnseverity.cr.usgs.gov/glossary"
+  ],
+  "source_run_id": "41175624166"
+}
