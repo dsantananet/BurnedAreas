@@ -1,0 +1,189 @@
+{
+  "generated_at": "2026-11-07T06:34:43.852719+00:00",
+  "as_of": "2026-11-07",
+  "method": "forest-v1-scl-20m-20261025",
+  "national": {
+    "source": "COPERNICUS/S2_SR_HARMONIZED",
+    "boundary": "Continente: USDOS/LSIB_SIMPLE/2017; ilhas: USDOS/LSIB/2017 detalhado, recortado por região oceânica",
+    "generated_at": "2026-11-07T06:30:18.099447+00:00",
+    "requested_end_exclusive": "2026-11-07",
+    "scale_m": 250,
+    "crs": "EPSG:3035",
+    "regions": [
+      {
+        "id": "continente",
+        "period_start": "2026-10-08",
+        "period_end_exclusive": "2026-11-07",
+        "scenes": {
+          "count": 430,
+          "first": 1791459583269,
+          "last": 1793964682084
+        },
+        "status": "processed",
+        "indices": {
+          "ndvi": {
+            "statistics": {
+              "ndvi_mean": 0.4653368063263319,
+              "ndvi_p10": 0.22667465007361734,
+              "ndvi_p50": 0.44529738604751196,
+              "ndvi_p90": 0.7421164154355216
+            },
+            "valid_area_ha": 8801781.887254905,
+            "valid_fraction": 0.9911842482121094,
+            "map": "ndvi-continente.png",
+            "change": {
+              "delta_count": 1409893,
+              "delta_mean": 0.023429665115398332
+            },
+            "unit": "índice adimensional"
+          },
+          "ndmi": {
+            "statistics": {
+              "ndmi_mean": -0.03391141888024382,
+              "ndmi_p10": -0.2382387014156449,
+              "ndmi_p50": -0.06641766071853451,
+              "ndmi_p90": 0.22259581175367593
+            },
+            "valid_area_ha": 8802013.137254903,
+            "valid_fraction": 0.9912102896842041,
+            "map": "ndmi-continente.png",
+            "change": {
+              "delta_count": 1409924,
+              "delta_mean": 0.014071889207968574
+            },
+            "unit": "índice adimensional"
+          }
+        },
+        "previous_scenes": {
+          "count": 418,
+          "first": 1788867579388,
+          "last": 1791372688968
+        }
+      },
+      {
+        "id": "madeira",
+        "period_start": "2026-10-08",
+        "period_end_exclusive": "2026-11-07",
+        "scenes": {
+          "count": 45,
+          "first": 1791547344968,
+          "last": 1793880165105
+        },
+        "status": "processed",
+        "indices": {
+          "ndvi": {
+            "statistics": {
+              "ndvi_mean": 0.6030767714993388,
+              "ndvi_p10": 0.22302575803100871,
+              "ndvi_p50": 0.644518982739028,
+              "ndvi_p90": 0.8943613136821661
+            },
+            "valid_area_ha": 56220.6862745098,
+            "valid_fraction": 0.6960980884192941,
+            "map": "ndvi-madeira.png",
+            "change": {
+              "delta_count": 9092,
+              "delta_mean": -0.019704332136415505
+            },
+            "unit": "índice adimensional"
+          },
+          "ndmi": {
+            "statistics": {
+              "ndmi_mean": 0.19251047636414328,
+              "ndmi_p10": -0.05812654606481365,
+              "ndmi_p50": 0.20677436634221724,
+              "ndmi_p90": 0.4101248944265823
+            },
+            "valid_area_ha": 56220.6862745098,
+            "valid_fraction": 0.6960980884192941,
+            "map": "ndmi-madeira.png",
+            "change": {
+              "delta_count": 9092,
+              "delta_mean": -0.0031985815251194434
+            },
+            "unit": "índice adimensional"
+          }
+        },
+        "previous_scenes": {
+          "count": 45,
+          "first": 1788955342736,
+          "last": 1791288172025
+        }
+      },
+      {
+        "id": "acores",
+        "period_start": "2026-10-08",
+        "period_end_exclusive": "2026-11-07",
+        "scenes": {
+          "count": 144,
+          "first": 1791462673538,
+          "last": 1793970068521
+        },
+        "status": "processed",
+        "indices": {
+          "ndvi": {
+            "statistics": {
+              "ndvi_mean": 0.6964231071027175,
+              "ndvi_p10": 0.4804205984784698,
+              "ndvi_p50": 0.7304847210025971,
+              "ndvi_p90": 0.8630743167816093
+            },
+            "valid_area_ha": 192582.0343137255,
+            "valid_fraction": 0.8046847852880996,
+            "map": "ndvi-acores.png",
+            "change": {
+              "delta_count": 28448,
+              "delta_mean": 0.002608466442304069
+            },
+            "unit": "índice adimensional"
+          },
+          "ndmi": {
+            "statistics": {
+              "ndmi_mean": 0.29914969478566944,
+              "ndmi_p10": 0.12318520886774682,
+              "ndmi_p50": 0.3027404892398992,
+              "ndmi_p90": 0.4706602710998008
+            },
+            "valid_area_ha": 192582.03431372554,
+            "valid_fraction": 0.8046847852880997,
+            "map": "ndmi-acores.png",
+            "change": {
+              "delta_count": 28448,
+              "delta_mean": 0.029727188001654
+            },
+            "unit": "índice adimensional"
+          }
+        },
+        "previous_scenes": {
+          "count": 147,
+          "first": 1788870671143,
+          "last": 1791378067406
+        }
+      }
+    ],
+    "status": "processed",
+    "interpretation": "NDVI descreve verdura relativa; NDMI é um índice espectral de humidade, não humidade medida do combustível. Médias sobre píxeis válidos em grelha de 250 m; sem inferir áreas sem observação. Janelas de 30 dias; a diferença para a janela anterior não é anomalia sazonal."
+  },
+  "discovery": {
+    "status": "processed",
+    "year": 2026,
+    "source_image_count": 8,
+    "source_polygons": 675,
+    "new_events": 0,
+    "latest_source_month": "2026-08-01",
+    "note": "Produto mensal com atraso; polígonos supersedidos são preservados mas excluídos da fila ativa."
+  },
+  "events_count": 678,
+  "events_attempted": 0,
+  "queue_remaining": 8,
+  "errors": [],
+  "status": "processed",
+  "shard": 0,
+  "shards": 1,
+  "severity_note": "dNBR pré menos pós; classes exploratórias, não validadas no terreno. Alteração espectral não é intensidade de fogo.",
+  "sources": [
+    "https://developers.google.com/earth-engine/datasets/catalog/COPERNICUS_S2_SR_HARMONIZED",
+    "https://burnseverity.cr.usgs.gov/glossary"
+  ],
+  "source_run_id": "42347270008"
+}
