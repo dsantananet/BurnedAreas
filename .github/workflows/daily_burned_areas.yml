@@ -93,7 +93,7 @@ jobs:
 
       - name: Verificar autenticação Google Drive
         id: drive_auth
-        if: github.event_name == 'schedule' || inputs.export_drive
+        if: (github.event_name == 'schedule' || inputs.export_drive) && steps.resultado.outputs.feature_count > 0
         env:
           DRIVE_TOKEN: ${{ secrets.RCLONE_DRIVE_TOKEN }}
         run: |
